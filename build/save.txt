@@ -1,0 +1,15 @@
+	// (239)   2.3 < T 2.47
+	// (1393) 2.35 < 2.42
+	// (8119) 2.37 < 2.399
+   //(47321) 2.379 < 2.391 
+
+	for(double i = 2.3; i <= 2.47; i += 0.01){
+		Net Camp(i, ComprimentoRede);
+		
+		myfile << i << "," << Camp.energy() << "," << Camp.senergy() << ",";
+		myfile << Camp.magnet() << "," << Camp.smagnet() << ",";
+		myfile << Camp.cv() << "," << Camp.scv() << ",";
+		myfile << Camp.susc() << "," << Camp.ssusc() << "," << Camp.BinderCumulant() << "," << 0 << std::endl;
+		
+		std::cout << (i/2.47)*100.0 << "%" << std::endl;
+	}

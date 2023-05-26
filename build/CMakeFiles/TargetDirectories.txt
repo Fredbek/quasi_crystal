@@ -1,0 +1,3 @@
+/home/ramos/Desktop/ic/ising/qc/anti+parallel/build/CMakeFiles/MonteCarlo.dir
+/home/ramos/Desktop/ic/ising/qc/anti+parallel/build/CMakeFiles/edit_cache.dir
+/home/ramos/Desktop/ic/ising/qc/anti+parallel/build/CMakeFiles/rebuild_cache.dir

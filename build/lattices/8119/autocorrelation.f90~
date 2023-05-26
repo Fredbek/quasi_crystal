@@ -1,0 +1,366 @@
+!
+      include 'shared_var.f90'
+!
+      program autocorrelation
+!
+      use shared_var
+!
+      implicit none
+!
+      integer i,j,k,ia,ie,ndis,numtd
+      integer nbins
+!
+      integer,allocatable :: icount(:)
+!
+      real*8 x,y,r,r0,ddis,xmean,statdevx
+      real*8 eps
+!
+      real*8,allocatable :: vrx(:),vry(:),ldos(:),vdis(:),vcorr(:)
+!
+      open(10,file='auto.in',status='old')
+!
+      open(12,file='appxt_8119_vertices.dat',status='old')
+      open(13,file='ldos8119.dat',status='old')
+!
+      open(20,file='count.dat',status='unknown')
+!
+      open(30,file='auto8119.dat',status='unknown')  
+!
+      read(10,*)nl
+      read(10,*)ndis,r0,ddis,eps
+      read(10,*)numtd
+!
+!
+!
+      dnl=dfloat(nl)
+!
+!
+!
+      CALL OMP_SET_NUM_THREADS(numtd)
+!
+      allocate(vrx(nl))
+      allocate(vry(nl))
+!
+      allocate (icount(ndis))
+      allocate (vdis(ndis))
+      allocate (vcorr(ndis))
+!
+      allocate(ldos(nl))
+!
+!
+!
+113   format(100(f25.15,1X))
+!
+      do k=1,ndis
+         vdis(k)=r0 + (k-1)*ddis 
+      enddo
+!
+      do i=1,nl
+	 read(12,*)vrx(i),vry(i)
+         read(13,*)ldos(i)
+      enddo
+!
+      call statdev(ldos,nl,xmean,statdevx)
+!
+      vcorr=0.0d0 
+!
+      do i=1,nl-1
+         do j=i+1,nl
+            r=dsqrt((vrx(i)-vrx(j))**2 + (vry(i)-vry(j))**2)
+            do k=1,ndis
+               x=dabs(r-vdis(k))
+               if (x.lt.eps) then
+                  icount(k)=icount(k) + 1
+                  y=(ldos(i)-xmean)*(ldos(j)-xmean )
+                  vcorr(k)=vcorr(k) + y
+               endif
+            enddo 
+         enddo
+      enddo
+!
+!
+!
+     write(20,*)xmean,statdevx
+!
+     do k=1,ndis
+        write(20,*)vdis(k),icount(k)
+        write(30,113)vdis(k),dabs(vcorr(k))/(dfloat(icount(k)))
+     enddo
+!
+!
+!
+      deallocate(ldos)
+!
+      deallocate(icount)
+      deallocate(vdis)
+      deallocate(vcorr)
+!
+      deallocate(vrx)
+      deallocate(vry)
+!
+      end
+!
+!
+!
+!*************************************************************************
+!
+!      mean value and standard deviation
+!
+!*************************************************************************
+!
+      subroutine statdev(dx,nx,xmean,statdevx)
+!
+      implicit none
+!
+      integer i,nx
+      real*8 dx(nx),xmean,statdevx,dnx,difx
+!
+      dnx=dfloat(nx)
+!
+      xmean=0.0d0
+      difx=0.0d0
+!
+      do i=1,nx
+         xmean=dx(i) + xmean
+      enddo
+!
+!      xmean=sum(dx)
+!
+      xmean=xmean/dnx
+!       
+      do i=1,nx
+         difx=(dx(i)-xmean)**2 + difx
+      enddo
+!
+      statdevx=DSQRT(difx/dfloat(nx-1))
+!
+      end subroutine statdev
+!
+!*************************************************************************
+!
+!      typical value
+!
+!*************************************************************************
+!
+      subroutine geomean(dx,nx,xmean,statdevx)
+!
+      use shared_var
+!
+      implicit none
+!
+      integer i,j,nn,nx
+      real*8 dx(nx),xmean,statdevx,dnx,difx
+!
+      dnx=dfloat(nx)
+!
+      xmean=0.0d0
+      difx=0.0d0
+!
+      do i=1,nx
+         xmean=DLOG(dx(i)) + xmean
+      enddo
+!
+      xmean=DEXP(xmean/dnx)
+!
+      do i=1,nx
+         difx=(DLOG(dx(i)/xmean))**2 + difx
+      enddo
+!
+      statdevx=DEXP(DSQRT(difx/dfloat(nx-1)))
+!
+      end subroutine geomean
+!
+!*************************************************************************
+!
+!     This subroutine takes a real array X(N) and forms a histogram 
+!     HISTX(N) of the distribution of value.
+!
+!*************************************************************************
+!
+      subroutine histogram(x,n,hist,nbins,xbins)
+!
+      use shared_var
+!
+      implicit none
+!
+      integer, intent(in) :: n,nbins
+      real*8, intent(in) :: x(n)
+      real*8, intent(out) :: hist(nbins),xbins(nbins)
+!
+      integer i,j,bin0,bin
+      real*8 xmin,xmax,binwidth,x0
+      
+!
+!     Initialize the vectors, extract the boudary values and find the bin width.
+!
+      do i=1,nbins
+         hist(i)=0.0d0
+      enddo
+!
+      xmin=MINVAL(x) 
+      xmax=MAXVAL(x)
+!
+!     MIN/MAXVAL. Fortran intrisic functions !
+!
+      binwidth=(xmax-xmin)/dfloat(nbins)
+!
+!     Calculates the histogram
+!
+      do i=1,n
+      IF (x(i).gt.xmin)THEN
+         bin=INT(1.0d0 + (x(i)-xmin)/binwidth)
+!
+        if (bin < 1    ) bin=1     ! Check for underflows
+        if (bin > nbins) bin=nbins ! Check for overflows
+!
+        hist(bin)=hist(bin) + 1.0d0
+      ENDIF         
+      enddo
+!
+!     Calculates the 'bin vector' to print the histogram
+!
+      x0=xmin + 0.5d0*binwidth !! Taking the mid-point between the points.
+!
+      do j=1,nbins
+         xbins(j)=x0 + (dfloat(j)-1.0d0)*binwidth
+      enddo
+!
+      end subroutine histogram
+!
+!*************************************************************************
+!     
+!    Bin function
+!
+!*************************************************************************
+!
+      integer function ibin(x,xmin,binwidth,nbins)
+!
+      implicit none
+!
+      integer nbins
+      real*8 x,xmin,binwidth
+!
+      x=dabs(x)
+!
+      ibin=INT(1.0d0 + (x-xmin)/binwidth)
+!
+      if (ibin < 1    ) ibin=1     ! Check for underflows
+      if (ibin > nbins) ibin=nbins ! Check for overflows
+!
+      end
+!
+!*************************************************************************
+!
+!     This subroutine takes a real array X(N) and forms a histogram 
+!     HISTX(N) of the distribution of value.
+!
+!*************************************************************************
+!
+      subroutine histogram1(n,dx,nbins,binwidth,xbins,hist)
+!
+      use shared_var
+!
+      implicit none
+!
+      integer, intent(in) :: n,nbins
+      real*8, intent(in) :: dx(n),binwidth
+      real*8, intent(out) :: hist(nbins+1),xbins(nbins + 1)
+!
+      integer i,j,bin0,bin
+      real*8 xmin,xmax,x,x0,delx,fx,loz
+      
+!
+!     Initialize the vectors, extract the boudary values and find the bin width.
+!
+      do i=1,nbins
+         hist(i)=0.0d0
+      enddo
+!
+      xmin=MINVAL(dx) 
+      xmax=MAXVAL(dx)
+!
+      if (xmin.gt.0.0d0) then
+         xmin=xmin*0.95d0
+      else
+         xmin=xmin*1.05d0
+      endif
+!
+      if (xmax.gt.0.0d0) then
+         xmax=xmax*1.05d0
+      else
+         xmax=xmax*0.95d0
+      endif
+!
+!     MIN/MAXVAL. Fortran intrisic functions !
+!
+      delx=(xmax-xmin)/dfloat(nbins)
+!
+!     Calculates the histogram
+!
+      x=xmin
+      do i=1,nbins + 1
+         fx=0.0d0
+         do j=1,n
+            x0=x-dx(j)
+            fx=fx + loz(x0,binwidth)
+         enddo
+         hist(i)=fx
+         xbins(i)=x
+         x=x+delx
+      enddo
+!
+      call integrate(hist,nbins+1,xbins)
+!
+      end subroutine histogram1
+!
+!*************************************************************************
+!
+!      lorentzian broadening
+!
+!*************************************************************************
+!
+      real*8 function loz(x,eps)
+!
+      implicit none
+!
+      real*8 x,eps,den
+      real*8, parameter :: dpi=3.1415926535897932385d0
+!
+      den=dpi*(x**2 + eps**2)
+      loz=eps/den
+!
+      end
+!
+!*************************************************************************
+!     
+!     This subroutine normalize the histogram. We calculate the area 
+!     under the curve by the usual trapezoidal rule.
+!
+!*************************************************************************
+!
+      subroutine integrate(hist,nbins,xbins)
+!
+      implicit none
+!
+      integer, intent(in) :: nbins
+      real*8, intent(inout) :: hist(nbins)
+      real*8, intent(in) :: xbins(nbins)
+!
+      integer i,j,naux
+      real*8 h,area,sumi
+!
+!     Now we find the integral
+!
+      sumi=0.0d0
+      do i=2,nbins
+         h=0.5d0*DABS(xbins(i)-xbins(i-1))
+         area=h*(hist(i-1)+hist(i))
+         sumi=area+sumi
+      enddo
+!
+      do j=1,nbins
+         hist(j)=hist(j)/sumi
+      enddo
+!
+      end subroutine integrate
+!

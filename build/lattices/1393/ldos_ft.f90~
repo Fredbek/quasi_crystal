@@ -1,0 +1,133 @@
+!
+      include 'shared_var.f90'
+!
+      program ldos_ft
+!
+      use shared_var
+!
+      implicit none
+!
+      character*1 jobz,uplo
+!
+      integer i,j,ix,iy,k,n,nmin,nmax,numtd,chunk
+      real*8 dl,a,dn,x,y,fac
+      complex*16 zn
+!
+      real*8,allocatable :: ftldos(:,:),dq(:),rho(:)
+!
+      open(10,file='ldos_ft.in',status='old')
+!
+      open(15,file='ldos1393.dat',status='old')
+!
+      open(20,file='appxt_1393_vertices.dat',status='old')
+!
+      open(30,file='ft_ldos_1393.dat',status='unknown')
+!
+ 113	format(1000(f25.15,1X))
+!
+      read(10,*)nl
+      read(10,*)dl
+      read(10,*)n
+      read(10,*)numtd
+!
+      chunk=nl/numtd
+!
+      dnl=dfloat(nl)
+      fac=2.0d0*dpi/dl
+!
+      nmin=-int(n*dl)
+      nmax=int(n*dl)
+!
+      CALL OMP_SET_NUM_THREADS(numtd)
+!
+      allocate(vx(nl))
+      allocate(vy(nl))
+!
+      n=2*nmax + 1
+      allocate(dq(n))
+      allocate(ftldos(n,n))
+      allocate(rho(nl))
+!
+!
+      do i=1,nl
+         read(20,*)vx(i),vy(i)
+      enddo
+!
+      i=1
+      j=nmin
+      do while (j.le.nmax)
+         dq(i)=dfloat(j-1)*fac
+         i=i+1
+         j=j+1
+      enddo
+!
+!
+!
+      do ix=1,n
+         do iy=1,n
+            zn=zero
+!$OMP  PARALLEL DO FIRSTPRIVATE(ix,iy) COPYIN(nl) DEFAULT(SHARED) PRIVATE(i,x,y) SCHEDULE(STATIC,chunk) REDUCTION(+:zn)  
+            do i=1,nl
+               x=dq(ix)*vx(i)
+               y=dq(iy)*vy(i)
+               a=rho(i)
+               zn=zn + dcmplx(a*dcos(x+y),-a*dsin(x+y))
+            enddo
+!$OMP  END PARALLEL DO
+            ftldos(ix,iy)=dreal(zn*dconjg(zn))/dnl
+         enddo
+      enddo
+!
+!
+!
+      do ix=1,n
+         write(30,113)(ftldos(ix,iy),iy=1,n)
+      enddo
+!
+!
+!
+      deallocate(vx)
+      deallocate(vy)
+!
+      deallocate(dq)
+      deallocate(ftldos)
+      deallocate(rho)
+!
+!
+!
+      end
+!
+!
+!
+!*************************************************************************
+!
+!     mean value and standard deviation
+!
+!*************************************************************************
+!
+      subroutine statdev(dx,nx,xmean,statdevx)
+!
+      implicit none
+!
+      integer i,nx
+      real*8 dx(nx),xmean,statdevx,dnx,difx
+!
+      dnx=dfloat(nx)
+!
+      xmean=0.0d0
+      difx=0.0d0
+!
+      do i=1,nx
+         xmean=dx(i) + xmean
+      enddo
+!
+      xmean=xmean/dnx
+!      
+      do i=1,nx
+         difx=(dx(i)-xmean)**2 + difx
+      enddo
+!
+      statdevx=DSQRT(difx/dfloat(nx-1))
+!
+      end subroutine statdev
+!
