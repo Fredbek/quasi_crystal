@@ -17,7 +17,7 @@ std::string Data_out_Path = "Results/Data/";
 std::string sites[4] = {"239", "1393", "8119", "47321"};
 
 //int TermSteps = 10; //Quantidade de passos para a termalização
-const static int MedPerBlock = 1500, blocks = 20, Med = blocks*MedPerBlock;
+const static int MedPerBlock = 2000, blocks = 25, Med = blocks*MedPerBlock;
 
 double J = -1; //Determina a intensidade e tipo das interaçes interspin
 
@@ -91,6 +91,10 @@ private:
 	int got = 0;
 	int tries = 0;
 
+	void(Lattice::*Term_Algthm)(int); //Ponteiro para a função de termalização.
+	
+	int Dif_Met_Wolf_Steps = MetTermSteps - WolffTermSteps;
+
 public:
 
 	Lattice(double fst_int_in, double fst_int_fim, double fst_int_step, double scd_int_fim, double scd_int_step, double trd_int_fim, double trd_int_step ,std::string Comp)
@@ -107,9 +111,8 @@ public:
 			qtd_redes += 1;
 		}
 
-		print(qtd_redes);
-
 		Temperatures = new double[qtd_redes];
+		Probabilities = new double[qtd_redes];
 		Termalization_Steps = new int[qtd_redes];
 		big_spin = new int*[qtd_redes];
 		bf_rede = new bool[int_sites_qtd];
@@ -122,11 +125,13 @@ public:
 			big_spin[i] = new int[int_sites_qtd];
 		}
 
+
 		for(int i = 0; i < int_sites_qtd; i++){
 			Viz[i] = new int[8];
 			bf_rede[i] = false;
 			phase_lat[i] = 0;
 		}
+
 
 		int indx = 0;
 		for(double i = fst_int_in; i < fst_int_fim; i += fst_int_step){
@@ -150,6 +155,7 @@ public:
 			Termalization_Steps[indx] = (Temperatures[indx] > 2 and Temperatures[indx] < 2.44) ? (MetTermSteps) : (MetTermSteps);
 			indx += 1;
 		}
+
 
 		this->InitLattices();
 		this->getViz();
@@ -280,35 +286,39 @@ public:
 
 	}
 
-	void Parallel_Termalization(){
-
-		int* Passos = new int[qtd_redes];
-
-		for(int i = 0; i < qtd_redes; i++){
-			Passos[i] = 0;
-		}
-
-		for(int cont = 0; cont < MetTermSteps/5; cont++){
-			for(int cont = 0; cont < 5; cont++){
-				for(int indx = 0; indx < qtd_redes; indx++){
-					
-					if(Passos[indx] > Termalization_Steps[indx]){
-						this->MetropolisStep(indx);
-						Passos[indx] += 1;
-					}
+	void Parallel_Termalization1(){
+		for(int i = 0; i < MetTermSteps/5; i++){
+			for(int j = 0; j < 5; j++){
+				for(int k = 0; k < qtd_redes; k++){
+					this->MetropolisStep(k);
 				}
-
 				for(int i = qtd_redes - 1; i >= 1; i -= 1){
 					int rede_ant = i - 1;
 					this->Parallel_Tempering(rede_ant, i);
 				}
-			
 			}
 		}
 
+		print(got/tries*100.0);
+	}
 
-		delete[] Passos;
-		std::cout << "Parallel Tempering Acceptance Ratio: " << 100.0*(got/tries) << "%" << std::endl;
+	void Parallel_Termalization(){
+		for(int i = 0; i < MetTermSteps/10; i++){
+			for(int j = 0; j < 10; j++){
+				for(int k = 0; k < qtd_redes; k++){
+					
+					Term_Algthm = (Temperatures[k] > 2 and Temperatures[k] < 3) ? &Lattice::WolffStep : &Lattice::MetropolisStep;
+
+					(this->*Term_Algthm)(k);
+				}
+				for(int i = qtd_redes - 1; i >= 1; i -= 1){
+					int rede_ant = i - 1;
+					this->Parallel_Tempering(rede_ant, i);
+				}
+			}
+		}
+
+		print(got/tries*100.0);
 	}
 
 	int get_qtd_redes(){
@@ -373,7 +383,9 @@ public:
 				med_mg_sq += pow(this->Ttl_magnetization(Spin_Config), 2)/MedPerBlock;
 				med_mg_qd += pow(this->Ttl_magnetization(Spin_Config), 4)/MedPerBlock;
 
-				this->MetropolisStep(indx);
+				Term_Algthm = (Temp > 1.6 and Temp < 3) ? &Lattice::WolffStep : &Lattice::MetropolisStep;
+
+				(this->*Term_Algthm)(indx);
 			}
 
 			cv_proc[vez] = (med_en_sq - pow(med_en, 2))/pow(Temp, 2);
@@ -469,25 +481,61 @@ public:
 		return DesvPadMed(binder_cumulant, blocks);
 	}
 
+	void addCluster(int ind_net, int ind){
+		
+		int* Spin_Config = big_spin[ind_net];
+
+		double prob = 1 - exp(-2*abs(J)/Temperatures[ind_net]);//probabilities[ind_net];
+
+		bf_cluster.push_back(ind);//Adiciona o spin no cluster
+		bf_rede[ind] = true;
+		
+		for(int i = 0; i < 8; i++){ //Percorre os vizinhos
+			if(Viz[ind][i] >= 0){
+				if(prob >= this->r_rand() and bf_rede[Viz[ind][i]] == false and phase_lat[ind]*Spin_Config[ind] == phase_lat[Viz[ind][i]]*Spin_Config[Viz[ind][i]]){ //Adiciona caso já não esteja com prob Padd 
+					this->addCluster(ind_net, Viz[ind][i]);
+				}
+			}
+		}
+	}
+
+	void WolffStep(int ind_net){
+		int ind = this->i_rand(); //Sorteia um spin aleatório
+		int* Spin_Config = big_spin[ind_net];
+		this->addCluster(ind_net, ind); //Adiciona ele e os vizinhos no buffer de acordo com a probabilidade
+
+		for(auto i : bf_cluster){ //Gira todos os spins no cluster
+			Spin_Config[i] = -Spin_Config[i];
+		}
+		
+		this->reset_bf_rede(); //Reseta o cluster e o buffer da rede
+		bf_cluster.clear();
+		
+	}
+
 };
 
 
 void Parallel_exporter(std::string ComprimentoRede, std::ofstream& file){
-	Lattice Redes(0.1, 2, 0.5, 3, 0.5, 5, 0.5, ComprimentoRede);
-	int pontos = Redes.get_qtd_redes();
+	Lattice* Redes = new Lattice(0.1, 1.5, 0.5, 3, 0.1, 5.5, 0.5, ComprimentoRede);
+
+	int pontos = Redes->get_qtd_redes();
+
+	print(pontos);
 
 	double* values = new double[10];
 
 	for(int i = 0; i < pontos; i++){
-		Redes.get_mean_values(i, values);
+		Redes->get_mean_values(i, values);
 
-		file << Redes.get_Temp(i) << "," << values[0] << "," << values[1] << ",";
+		file << Redes->get_Temp(i) << "," << values[0] << "," << values[1] << ",";
 		file << values[2] << "," << values[3] << ",";
 		file << values[4] << "," << values[5] << ",";
 		file << values[6] << "," << values[7] << "," << values[8] << "," << 0 << std::endl;
 	}
 
 	delete[] values;
+	delete[] Redes;
 }
 
 int main(int argc, char** argv){
